@@ -21,7 +21,7 @@
     <!-- Google Fonts (Jua for the kids' style, Noto Sans KR for body) -->
     <link href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
 
-    <!-- Custom Styles (Remains the same) -->
+    <!-- Custom Styles -->
     <style>
         /* Custom Styles for Aesthetics and Responsiveness */
         body {
@@ -75,7 +75,6 @@
 <body>
     
     <!-- 1. Firebase SDK Imports and Global Exposure (MUST RUN FIRST) -->
-    <!-- type="module" 스크립트는 지연 실행되므로, 일반 스크립트보다 먼저 실행되도록 위치를 조정했습니다. -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -107,7 +106,6 @@
         const { useState, useEffect, useCallback, useRef } = React;
 
         // --- Firebase Configuration ---
-        // 사용자가 제공한 Firebase 설정 객체입니다.
         const CONFIG_OBJECT = {
             apiKey: "AIzaSyBfTfZv6RTrtzhHURNdk7pXkOnsKo9nw40",
             authDomain: "compliment-3a93b.firebaseapp.com",
@@ -118,15 +116,9 @@
             appId: "1:739944980230:web:18326b1af8fbc33c0a4887"
         };
         
-        // Canvas 환경에서 주입되는 APP ID를 우선 사용하며, 없으면 CONFIG_OBJECT의 projectId를 사용합니다.
-        // Firestore 경로 규칙을 준수하기 위해 Canvas 환경 변수를 우선합니다.
         const APP_ID = typeof __app_id !== 'undefined' ? __app_id : CONFIG_OBJECT.projectId; 
         const FIREBASE_CONFIG = CONFIG_OBJECT;
-        const INITIAL_AUTH_TOKEN = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        // Global Firebase Instances (Will be set during initialization)
-        let db = null;
-        let auth = null;
+        const INITIAL_AUTH_TOKEN = typeof __initial_auth_token !== 'undefined' ? INITIAL_AUTH_TOKEN : null;
 
         // --- Utility Components ---
 
@@ -168,11 +160,11 @@
                         </div>
                         <div className="text-xs text-gray-500 mt-1">{date}</div>
                     </div>
-                    <!-- Message content -->
+                    {/* Message content */}
                     <p className="text-base text-gray-800 break-words my-3 min-h-[50px] leading-relaxed">
                         {compliment.message}
                     </p>
-                    <!-- Sender info -->
+                    {/* Sender info */}
                     <div className="mt-3 pt-2 border-t border-dashed border-gray-300 text-right text-xs text-gray-600">
                         <i className="ph-fill ph-paper-plane-tilt"></i> 보낸 사람: {compliment.sender}
                     </div>
@@ -181,7 +173,7 @@
         };
         
         // Compliment Submission Form
-        const ComplimentForm = ({ userId, onSubmitted }) => {
+        const ComplimentForm = ({ userId, firebaseDb, onSubmitted }) => { // firebaseDb를 props로 받습니다.
             const [sender, setSender] = useState('');
             const [recipient, setRecipient] = useState('');
             const [message, setMessage] = useState('');
@@ -195,9 +187,9 @@
                     return;
                 }
                 
-                // CRITICAL CHECK: Ensure DB and Auth are ready before writing
-                if (!db || !userId) {
-                    console.error("Write attempt failed: DB or UserId not available.", { db: !!db, userId });
+                // CRITICAL CHECK: Ensure DB and UserId are ready before writing
+                if (!firebaseDb || !userId) {
+                    console.error("Write attempt failed: DB or UserId not available.", { db: !!firebaseDb, userId });
                     setModalMessage("데이터베이스 연결 및 인증 상태를 확인 중입니다. 잠시 후 다시 시도해 주세요.");
                     return;
                 }
@@ -215,7 +207,8 @@
 
                     // Store data in a public collection path for shared access
                     const publicCollectionPath = `/artifacts/${APP_ID}/public/data/compliments`;
-                    await FirebaseServices.addDoc(FirebaseServices.collection(db, publicCollectionPath), complimentData);
+                    // **firebaseDb를 사용하여 addDoc을 호출합니다.**
+                    await FirebaseServices.addDoc(FirebaseServices.collection(firebaseDb, publicCollectionPath), complimentData);
                     
                     setModalMessage("칭찬 편지가 성공적으로 전달되었습니다! 💌");
                     
@@ -381,6 +374,11 @@
             const [userId, setUserId] = useState(null);
             const [isAuthReady, setIsAuthReady] = useState(false);
             const [error, setError] = useState(null);
+            
+            // New state variables for Firebase instances
+            const [firebaseDb, setFirebaseDb] = useState(null);
+            const [firebaseAuth, setFirebaseAuth] = useState(null);
+            
             const messagesEndRef = useRef(null);
 
             // Scroll to bottom when new message arrives or on initial load
@@ -403,49 +401,47 @@
                         const { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, getFirestore, setLogLevel } = window.FirebaseServices;
 
                         setLogLevel('debug'); // Enable detailed Firebase logging
-                        // 정의된 FIREBASE_CONFIG를 사용하여 앱을 초기화합니다.
                         const app = initializeApp(FIREBASE_CONFIG); 
-                        auth = getAuth(app);
-                        db = getFirestore(app);
+                        
+                        // Set auth and db instances into state
+                        const newAuth = getAuth(app);
+                        const newDb = getFirestore(app);
+                        setFirebaseAuth(newAuth);
+                        setFirebaseDb(newDb);
 
                         let authAttempted = false;
 
                         // Auth Listener: handles both initial sign-in and state changes
-                        const unsubscribe = onAuthStateChanged(auth, (user) => {
+                        const unsubscribe = onAuthStateChanged(newAuth, (user) => {
                             if (user) {
                                 setUserId(user.uid);
-                                // Set AuthReady here, immediately after we get a valid user
                                 setIsAuthReady(true);
                             } else {
-                                // If the listener triggers and there's no user, and we haven't tried signing in yet, 
-                                // attempt anonymous sign-in.
                                 if (!authAttempted) {
                                     authAttempted = true;
-                                    signInAnonymously(auth)
+                                    signInAnonymously(newAuth)
                                         .then(anonUser => {
                                             setUserId(anonUser.user.uid);
-                                            setIsAuthReady(true); // Set AuthReady upon successful anonymous sign-in
+                                            setIsAuthReady(true);
                                         })
                                         .catch(anonError => {
                                             console.error("Anonymous sign-in failed:", anonError);
                                             setError("익명 로그인 실패: " + anonError.message);
-                                            setIsAuthReady(true); // Still set ready, but with an error, to stop loading
+                                            setIsAuthReady(true);
                                         });
                                 } else if (authAttempted) {
-                                    // If we attempted auth but still no user (shouldn't happen with anonymous), 
-                                    // ensure ready state is set
                                     setIsAuthReady(true);
                                 }
                             }
-                            setIsLoading(false); // Stop loading after the listener's first execution
+                            setIsLoading(false);
                         });
 
                         // Attempt custom token sign-in first (if token is provided)
                         (async () => {
                             try {
                                 if (INITIAL_AUTH_TOKEN) {
-                                    await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
-                                    authAttempted = true; // Mark as attempted
+                                    await signInWithCustomToken(newAuth, INITIAL_AUTH_TOKEN);
+                                    authAttempted = true;
                                 }
                             } catch (e) {
                                 console.warn("Custom token sign-in failed, proceeding with listener logic.", e);
@@ -471,9 +467,10 @@
 
 
             // 2. Fetch/Listen to Compliments (Data Listener)
+            // firebaseDb가 null이 아닐 때만 실행됩니다.
             useEffect(() => {
-                // CRITICAL CHECK: Only proceed if auth is ready AND we have a valid userId
-                if (!isAuthReady || !db || !userId) {
+                // CRITICAL CHECK: Only proceed if auth is ready AND we have a valid userId AND db instance
+                if (!isAuthReady || !firebaseDb || !userId) {
                     if (isAuthReady && !userId) {
                          console.warn("Firestore listener skipped: Authentication ready, but userId is null. Permissions likely insufficient if this persists.");
                     } else if (!isAuthReady) {
@@ -484,7 +481,8 @@
                 
                 // Public data path: /artifacts/{appId}/public/data/compliments
                 const publicCollectionPath = `/artifacts/${APP_ID}/public/data/compliments`;
-                const complimentsCol = window.FirebaseServices.collection(db, publicCollectionPath);
+                // **firebaseDb 상태 변수를 사용합니다.**
+                const complimentsCol = window.FirebaseServices.collection(firebaseDb, publicCollectionPath);
                 
                 // Use onSnapshot to listen for real-time updates
                 const unsubscribe = window.FirebaseServices.onSnapshot(
@@ -494,6 +492,7 @@
                         const loadedCompliments = snapshot.docs
                             .map(doc => ({ id: doc.id, ...doc.data() }))
                             // Client-side sort by createdAt ascending (oldest first, newest last)
+                            // toMillis() 호출 전 안전하게 검사합니다.
                             .sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
                             
                         setCompliments(prevCompliments => {
@@ -507,7 +506,6 @@
                     }, 
                     (error) => {
                         console.error("Firestore Snapshot Error:", error);
-                        // Only show the error if we are sure we are authenticated (userId is not null)
                         if (userId) {
                             setError("데이터를 불러오는 중 오류가 발생했습니다: 권한 문제일 수 있습니다. " + error.message);
                         }
@@ -516,7 +514,7 @@
 
                 return () => unsubscribe(); // Cleanup listener
 
-            }, [isAuthReady, userId, APP_ID]); // Depend on userId to ensure auth success before listening
+            }, [isAuthReady, userId, APP_ID, firebaseDb]); // firebaseDb를 의존성 배열에 추가
 
             if (isLoading) {
                 return (
@@ -530,7 +528,7 @@
 
             return (
                 <div className="max-w-xl mx-auto p-4 md:p-6 flex flex-col min-h-screen">
-                    <!-- Header -->
+                    {/* Header */}
                     <header className="text-center mb-6 pt-4">
                         <h1 className="kids-font text-5xl text-pink-600 border-b-4 border-pink-300 inline-block pb-2 px-4 shadow-sm bg-white rounded-t-xl">
                             <i className="ph-fill ph-star-four text-yellow-400 mr-2"></i> 과사 칭찬 편지함
@@ -543,11 +541,11 @@
                                 오류: {error}
                             </div>
                         )}
-                        <!-- API Key Input Component added here -->
+                        {/* API Key Input Component added here */}
                         <ApiKeyInput />
                     </header>
                     
-                    <!-- Compliment List (Scrollable Area) -->
+                    {/* Compliment List (Scrollable Area) */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-pink-50 rounded-xl shadow-inner mb-6 border-4 border-pink-200" style={{ minHeight: '300px' }}>
                         <div className="grid grid-cols-1 gap-4">
                             {compliments.length > 0 ? (
@@ -560,13 +558,17 @@
                                     아직 칭찬 편지가 없어요. 첫 번째 편지를 작성해 주세요!
                                 </div>
                             )}
-                            <!-- Scroll marker -->
+                            {/* Scroll marker */}
                             <div ref={messagesEndRef} />
                         </div>
                     </div>
 
-                    <!-- Compliment Form -->
-                    <ComplimentForm userId={userId} onSubmitted={scrollToBottom} />
+                    {/* Compliment Form */}
+                    <ComplimentForm 
+                        userId={userId} 
+                        firebaseDb={firebaseDb} // DB 인스턴스를 prop으로 전달
+                        onSubmitted={scrollToBottom} 
+                    />
                 </div>
             );
         };
