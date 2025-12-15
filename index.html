@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>과사 칭찬 편지함</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Phosphor Icons (for cute icons) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Google Fonts (Jua for the kids' style, Noto Sans KR for body) -->
+    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase objects globally for the Babel script
+        window.FirebaseServices = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            doc,
+            addDoc,
+            onSnapshot,
+            collection,
+            query,
+            serverTimestamp,
+            setLogLevel,
+        };
+    </script>
+
+    <style>
+        /* Custom Styles for Aesthetics and Responsiveness */
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #fcf4f7; /* Very light pink background */
+            min-height: 100vh;
+        }
+        h1, h2, h3, .kids-font {
+            font-family: 'Jua', sans-serif; /* Cute, bold font for headings/important text */
+        }
+        /* Pastel 3D button effect */
+        .pastel-button {
+            transition: all 0.2s;
+            /* Default shadow (pink/red for confirmation) */
+            box-shadow: 0 4px 0 0 #ef4444; 
+        }
+        .pastel-button-green {
+            /* Specific shadow for the green submit button */
+            box-shadow: 0 4px 0 0 #16a34a; 
+        }
+        .pastel-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 0 0 rgba(0,0,0,0.1);
+        }
+        .pastel-button:active {
+            transform: translateY(2px);
+            box-shadow: none !important; /* Override shadow on click */
+        }
+        .compliment-card-bg {
+            background-color: #ffffff;
+            transition: transform 0.3s, box-shadow 0.3s;
+            border-radius: 1rem; /* Rounded corners */
+        }
+        .compliment-card-bg:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* Lighter shadow lift */
+        }
+        /* Custom scrollbar styling for a pastel look */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #fbcfe8; /* Light pink for scrollbar */
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #ffe4e6; /* Even lighter pink */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Import React Hooks
+        const { useState, useEffect, useCallback, useRef } = React;
+
+        // --- Firebase Configuration ---
+        // 사용자가 제공한 Firebase 설정 객체입니다.
+        const CONFIG_OBJECT = {
+            apiKey: "AIzaSyBfTfZv6RTrtzhHURNdk7pXkOnsKo9nw40",
+            authDomain: "compliment-3a93b.firebaseapp.com",
+            databaseURL: "https://compliment-3a93b-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "compliment-3a93b",
+            storageBucket: "compliment-3a93b.firebasestorage.app",
+            messagingSenderId: "739944980230",
+            appId: "1:739944980230:web:18326b1af8fbc33c0a4887"
+        };
+        
+        // Canvas 환경에서 주입되는 APP ID를 우선 사용하며, 없으면 CONFIG_OBJECT의 projectId를 사용합니다.
+        // Firestore 경로 규칙을 준수하기 위해 Canvas 환경 변수를 우선합니다.
+        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : CONFIG_OBJECT.projectId; 
+        const FIREBASE_CONFIG = CONFIG_OBJECT;
+        const INITIAL_AUTH_TOKEN = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Global Firebase Instances (Will be set during initialization)
+        let db = null;
+        let auth = null;
+
+        // --- Utility Components ---
+
+        // Custom Modal instead of alert()
+        const SimpleModal = ({ message, onClose }) => (
+            <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full border-4 border-pink-300">
+                    <div className="text-3xl text-center mb-4 text-pink-500">
+                        <i className="ph-fill ph-sparkle-four"></i>
+                    </div>
+                    <p className="kids-font text-lg text-gray-800 text-center mb-6">{message}</p>
+                    <button 
+                        onClick={onClose}
+                        className="w-full bg-pink-400 text-white kids-font text-xl py-2 rounded-full pastel-button"
+                        style={{ boxShadow: '0 4px 0 0 #db2777' }} // Custom shadow for pink button
+                    >
+                        확인
+                    </button>
+                </div>
+            </div>
+        );
+
+        // Individual Compliment Card
+        const ComplimentCard = ({ compliment }) => {
+            // Format timestamp from Firestore
+            const date = compliment.createdAt ? new Date(compliment.createdAt.toDate()).toLocaleDateString('ko-KR', {
+                month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
+            }) : '방금 전';
+
+            // Differentiate cards for 'everyone' vs. specific person
+            const cardColor = compliment.recipient === '모두' ? 'bg-yellow-50 border-yellow-300' : 'bg-pink-50 border-pink-300';
+            const recipientTextClass = compliment.recipient === '모두' ? 'text-yellow-700' : 'text-pink-600';
+
+            return (
+                <div className={`compliment-card-bg p-4 rounded-xl shadow-md ${cardColor} border-b-4 h-full`}>
+                    <div className="flex justify-between items-start mb-2 border-b pb-2 border-dashed border-gray-300">
+                        <div className="text-sm font-bold text-gray-700">
+                            받는 사람: <span className={`${recipientTextClass} kids-font text-lg`}>{compliment.recipient}</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">{date}</div>
+                    </div>
+                    <!-- Message content -->
+                    <p className="text-base text-gray-800 break-words my-3 min-h-[50px] leading-relaxed">
+                        {compliment.message}
+                    </p>
+                    <!-- Sender info -->
+                    <div className="mt-3 pt-2 border-t border-dashed border-gray-300 text-right text-xs text-gray-600">
+                        <i className="ph-fill ph-paper-plane-tilt"></i> 보낸 사람: {compliment.sender}
+                    </div>
+                </div>
+            );
+        };
+        
+        // Compliment Submission Form
+        const ComplimentForm = ({ userId, onSubmitted }) => {
+            const [sender, setSender] = useState('');
+            const [recipient, setRecipient] = useState('');
+            const [message, setMessage] = useState('');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [modalMessage, setModalMessage] = useState(null);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!sender.trim() || !recipient.trim() || !message.trim()) {
+                    setModalMessage("보낸 사람, 받는 사람, 메시지를 모두 입력해주세요!");
+                    return;
+                }
+                
+                // CRITICAL CHECK: Ensure DB and Auth are ready before writing
+                if (!db || !userId) {
+                    console.error("Write attempt failed: DB or UserId not available.", { db: !!db, userId });
+                    setModalMessage("데이터베이스 연결 및 인증 상태를 확인 중입니다. 잠시 후 다시 시도해 주세요.");
+                    return;
+                }
+
+                setIsSubmitting(true);
+                
+                try {
+                    const complimentData = {
+                        sender: sender.trim(),
+                        recipient: recipient.trim(),
+                        message: message.trim(),
+                        createdAt: FirebaseServices.serverTimestamp(),
+                        userId: userId, // Store the author's userId for identification
+                    };
+
+                    // Store data in a public collection path for shared access
+                    const publicCollectionPath = `/artifacts/${APP_ID}/public/data/compliments`;
+                    await FirebaseServices.addDoc(FirebaseServices.collection(db, publicCollectionPath), complimentData);
+                    
+                    setModalMessage("칭찬 편지가 성공적으로 전달되었습니다! 💌");
+                    
+                    // Clear form only after successful submission
+                    setSender('');
+                    setRecipient('');
+                    setMessage('');
+                    
+                    if (onSubmitted) onSubmitted();
+
+                } catch (error) {
+                    console.error("Error writing document: ", error);
+                    setModalMessage("편지 전송에 실패했습니다: " + error.message);
+                } finally {
+                    setIsSubmitting(false);
+                }
+            };
+
+            return (
+                <>
+                    <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl shadow-xl border-4 border-pink-100 mb-6">
+                        <h2 className="kids-font text-2xl text-pink-600 mb-4 text-center border-b pb-2">새 칭찬 편지 쓰기</h2>
+                        <div className="space-y-4">
+                            <div className="flex flex-col">
+                                <label htmlFor="sender" className="kids-font text-gray-700 mb-1">보낸 사람 (내 이름)</label>
+                                <input
+                                    id="sender"
+                                    type="text"
+                                    value={sender}
+                                    onChange={(e) => setSender(e.target.value)}
+                                    className="p-3 border-2 border-pink-200 rounded-xl focus:ring-pink-400 focus:border-pink-400 transition"
+                                    placeholder="예: 제미나이"
+                                    required
+                                />
+                            </div>
+                            <div className="flex flex-col">
+                                <label htmlFor="recipient" className="kids-font text-gray-700 mb-1">받는 사람 (동료 이름)</label>
+                                <input
+                                    id="recipient"
+                                    type="text"
+                                    value={recipient}
+                                    onChange={(e) => setRecipient(e.target.value)}
+                                    className="p-3 border-2 border-blue-200 rounded-xl focus:ring-blue-400 focus:border-blue-400 transition"
+                                    placeholder="예: 철수, 영희, 또는 모두"
+                                    required
+                                />
+                            </div>
+                            <div className="flex flex-col">
+                                <label htmlFor="message" className="kids-font text-gray-700 mb-1">칭찬 메시지</label>
+                                <textarea
+                                    id="message"
+                                    value={message}
+                                    onChange={(e) => setMessage(e.target.value)}
+                                    className="p-3 border-2 border-yellow-200 rounded-xl focus:ring-yellow-400 focus:border-yellow-400 transition h-24 resize-none"
+                                    placeholder="무슨 일을 잘 했는지 구체적으로 칭찬해 주세요!"
+                                    required
+                                ></textarea>
+                            </div>
+                        </div>
+                        
+                        <button 
+                            type="submit"
+                            disabled={isSubmitting}
+                            className={`w-full mt-6 py-3 rounded-full text-white kids-font text-xl pastel-button pastel-button-green ${isSubmitting ? 'bg-gray-400' : 'bg-green-400 hover:bg-green-500'}`}
+                        >
+                            {isSubmitting ? '전송 중...' : <><i className="ph-fill ph-heart-straight text-lg mr-1"></i> 사랑 담아 보내기</>}
+                        </button>
+                    </form>
+                    
+                    {modalMessage && <SimpleModal message={modalMessage} onClose={() => setModalMessage(null)} />}
+                </>
+            );
+        };
+        
+        // --- API Key Input Component ---
+        const ApiKeyInput = () => {
+            const STORAGE_KEY = 'externalApiKey';
+            // NOTE: Per instructions, we are using localStorage for external API key, 
+            // but for application data (compliments), we are correctly using Firestore.
+            const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY) || '');
+            const [isEditing, setIsEditing] = useState(false);
+            const [modalMessage, setModalMessage] = useState(null);
+
+            const handleSave = () => {
+                localStorage.setItem(STORAGE_KEY, apiKey.trim());
+                setIsEditing(false);
+                setModalMessage(apiKey.trim() ? "API 키가 로컬 저장소에 저장되었습니다." : "API 키가 로컬 저장소에서 제거되었습니다.");
+            };
+
+            const handleEdit = () => {
+                setIsEditing(true);
+            };
+
+            const handleClear = () => {
+                setApiKey('');
+                localStorage.removeItem(STORAGE_KEY);
+                setIsEditing(false);
+                setModalMessage("API 키가 삭제되었습니다.");
+            };
+
+            return (
+                <div className="mt-4 p-4 bg-purple-50 border-2 border-purple-200 rounded-xl shadow-md">
+                    <h3 className="kids-font text-lg text-purple-600 flex items-center mb-2">
+                        <i className="ph-fill ph-key text-xl mr-2"></i> API 키 관리 (선택 사항)
+                    </h3>
+                    <p className="text-xs text-gray-600 mb-3">
+                        <span className="font-bold text-red-500">주의:</span> 이 앱은 Firebase 통합 기능을 사용하므로 별도의 키가 필요 없습니다. 이 필드는 외부 서비스 연동을 위한 키를 로컬에 저장할 때 사용하세요.
+                    </p>
+
+                    {!isEditing && apiKey && (
+                        <div className="flex justify-between items-center">
+                            <span className="text-sm font-mono text-gray-700 truncate mr-4">
+                                API Key: ****************{apiKey.slice(-4)}
+                            </span>
+                            <div className="flex space-x-2">
+                                <button
+                                    onClick={handleEdit}
+                                    className="px-3 py-1 text-xs bg-purple-400 text-white rounded-full pastel-button"
+                                    style={{ boxShadow: '0 3px 0 0 #8b5cf6' }}
+                                >
+                                    수정
+                                </button>
+                                <button
+                                    onClick={handleClear}
+                                    className="px-3 py-1 text-xs bg-red-400 text-white rounded-full pastel-button"
+                                    style={{ boxShadow: '0 3px 0 0 #dc2626' }}
+                                >
+                                    삭제
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {(isEditing || !apiKey) && (
+                        <div className="flex flex-col space-y-2">
+                            <input
+                                type="text"
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                                className="p-2 border-2 border-purple-300 rounded-lg focus:ring-purple-400 focus:border-purple-400 text-sm font-mono"
+                                placeholder="여기에 API 키를 입력하세요"
+                            />
+                            <button
+                                onClick={handleSave}
+                                className="w-full py-2 text-sm bg-purple-500 text-white rounded-lg kids-font pastel-button"
+                                style={{ boxShadow: '0 4px 0 0 #7c3aed' }}
+                            >
+                                {apiKey.trim() ? '키 저장' : '키 입력'}
+                            </button>
+                        </div>
+                    )}
+                    
+                    {modalMessage && <SimpleModal message={modalMessage} onClose={() => setModalMessage(null)} />}
+                </div>
+            );
+        };
+
+
+        // --- Main App Component ---
+        const App = () => {
+            const [compliments, setCompliments] = useState([]);
+            const [isLoading, setIsLoading] = useState(true);
+            const [userId, setUserId] = useState(null);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [error, setError] = useState(null);
+            const messagesEndRef = useRef(null);
+
+            // Scroll to bottom when new message arrives or on initial load
+            const scrollToBottom = () => {
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            // 1. Initialize Firebase and Authenticate
+            useEffect(() => {
+                // FIREBASE_CONFIG 객체가 유효한지 확인합니다.
+                if (window.FirebaseServices && Object.keys(FIREBASE_CONFIG).length > 0 && FIREBASE_CONFIG.apiKey) {
+                    try {
+                        const { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, getFirestore, setLogLevel } = window.FirebaseServices;
+
+                        setLogLevel('debug'); // Enable detailed Firebase logging
+                        // 정의된 FIREBASE_CONFIG를 사용하여 앱을 초기화합니다.
+                        const app = initializeApp(FIREBASE_CONFIG); 
+                        auth = getAuth(app);
+                        db = getFirestore(app);
+
+                        let authAttempted = false;
+
+                        // Auth Listener: handles both initial sign-in and state changes
+                        const unsubscribe = onAuthStateChanged(auth, (user) => {
+                            if (user) {
+                                setUserId(user.uid);
+                                // Set AuthReady here, immediately after we get a valid user
+                                setIsAuthReady(true);
+                            } else {
+                                // If the listener triggers and there's no user, and we haven't tried signing in yet, 
+                                // attempt anonymous sign-in.
+                                if (!authAttempted) {
+                                    authAttempted = true;
+                                    signInAnonymously(auth)
+                                        .then(anonUser => {
+                                            setUserId(anonUser.user.uid);
+                                            setIsAuthReady(true); // Set AuthReady upon successful anonymous sign-in
+                                        })
+                                        .catch(anonError => {
+                                            console.error("Anonymous sign-in failed:", anonError);
+                                            setError("익명 로그인 실패: " + anonError.message);
+                                            setIsAuthReady(true); // Still set ready, but with an error, to stop loading
+                                        });
+                                } else if (authAttempted) {
+                                    // If we attempted auth but still no user (shouldn't happen with anonymous), 
+                                    // ensure ready state is set
+                                    setIsAuthReady(true);
+                                }
+                            }
+                            setIsLoading(false); // Stop loading after the listener's first execution
+                        });
+
+                        // Attempt custom token sign-in first (if token is provided)
+                        (async () => {
+                            try {
+                                if (INITIAL_AUTH_TOKEN) {
+                                    await signInWithCustomToken(auth, INITIAL_AUTH_TOKEN);
+                                    authAttempted = true; // Mark as attempted
+                                }
+                            } catch (e) {
+                                console.warn("Custom token sign-in failed, proceeding with listener logic.", e);
+                            }
+                        })();
+                        
+                        return () => unsubscribe(); // Cleanup auth listener
+
+                    } catch (e) {
+                        console.error("Firebase Initialization Error:", e);
+                        setError("Firebase 설정 중 오류가 발생했습니다: " + e.message);
+                        setIsLoading(false);
+                        setIsAuthReady(true);
+                    }
+                } else {
+                    // Fallback for non-Canvas environments or incomplete config
+                    setIsAuthReady(true);
+                    setIsLoading(false);
+                    setUserId(crypto.randomUUID());
+                    setError("⚠️ Firebase 환경 설정이 없거나 불완전합니다. 데이터 저장 기능은 작동하지 않습니다.");
+                }
+            }, []); // Run only once on mount
+
+
+            // 2. Fetch/Listen to Compliments (Data Listener)
+            useEffect(() => {
+                // CRITICAL CHECK: Only proceed if auth is ready AND we have a valid userId
+                if (!isAuthReady || !db || !userId) {
+                    if (isAuthReady && !userId) {
+                         console.warn("Firestore listener skipped: Authentication ready, but userId is null. Permissions likely insufficient if this persists.");
+                    } else if (!isAuthReady) {
+                         console.log("Firestore listener skipped: Waiting for authentication readiness.");
+                    }
+                    return;
+                }
+                
+                // Public data path: /artifacts/{appId}/public/data/compliments
+                const publicCollectionPath = `/artifacts/${APP_ID}/public/data/compliments`;
+                const complimentsCol = window.FirebaseServices.collection(db, publicCollectionPath);
+                
+                // Use onSnapshot to listen for real-time updates
+                const unsubscribe = window.FirebaseServices.onSnapshot(
+                    // Fetch all documents 
+                    window.FirebaseServices.query(complimentsCol), 
+                    (snapshot) => {
+                        const loadedCompliments = snapshot.docs
+                            .map(doc => ({ id: doc.id, ...doc.data() }))
+                            // Client-side sort by createdAt ascending (oldest first, newest last)
+                            .sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0));
+                            
+                        setCompliments(prevCompliments => {
+                            const newCount = loadedCompliments.length;
+                            // Only scroll if a new message was added
+                            if (newCount > prevCompliments.length) {
+                                setTimeout(scrollToBottom, 100);
+                            }
+                            return loadedCompliments;
+                        });
+                    }, 
+                    (error) => {
+                        console.error("Firestore Snapshot Error:", error);
+                        // Only show the error if we are sure we are authenticated (userId is not null)
+                        if (userId) {
+                            setError("데이터를 불러오는 중 오류가 발생했습니다: 권한 문제일 수 있습니다. " + error.message);
+                        }
+                    }
+                );
+
+                return () => unsubscribe(); // Cleanup listener
+
+            }, [isAuthReady, userId, APP_ID]); // Depend on userId to ensure auth success before listening
+
+            if (isLoading) {
+                return (
+                    <div className="flex items-center justify-center min-h-screen">
+                        <div className="text-xl text-pink-500 kids-font animate-pulse">
+                            <i className="ph-fill ph-heart-break text-3xl"></i> 로딩 중...
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-xl mx-auto p-4 md:p-6 flex flex-col min-h-screen">
+                    <!-- Header -->
+                    <header className="text-center mb-6 pt-4">
+                        <h1 className="kids-font text-5xl text-pink-600 border-b-4 border-pink-300 inline-block pb-2 px-4 shadow-sm bg-white rounded-t-xl">
+                            <i className="ph-fill ph-star-four text-yellow-400 mr-2"></i> 과사 칭찬 편지함
+                        </h1>
+                        <p className="text-sm text-gray-500 mt-2">
+                            서로에게 따뜻한 마음을 전해주세요. (현재 사용자 ID: <span className="font-mono text-xs text-pink-500 break-all">{userId}</span>)
+                        </p>
+                        {error && (
+                            <div className="mt-2 p-2 bg-red-100 text-red-700 rounded-lg text-sm border border-red-300">
+                                오류: {error}
+                            </div>
+                        )}
+                        <!-- API Key Input Component added here -->
+                        <ApiKeyInput />
+                    </header>
+                    
+                    <!-- Compliment List (Scrollable Area) -->
+                    <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-pink-50 rounded-xl shadow-inner mb-6 border-4 border-pink-200" style={{ minHeight: '300px' }}>
+                        <div className="grid grid-cols-1 gap-4">
+                            {compliments.length > 0 ? (
+                                compliments.map((c) => (
+                                    <ComplimentCard key={c.id} compliment={c} />
+                                ))
+                            ) : (
+                                <div className="text-center p-10 text-gray-500 kids-font">
+                                    <i className="ph ph-envelope-open text-4xl mb-2 block"></i>
+                                    아직 칭찬 편지가 없어요. 첫 번째 편지를 작성해 주세요!
+                                </div>
+                            )}
+                            <!-- Scroll marker -->
+                            <div ref={messagesEndRef} />
+                        </div>
+                    </div>
+
+                    <!-- Compliment Form -->
+                    <ComplimentForm userId={userId} onSubmitted={scrollToBottom} />
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
